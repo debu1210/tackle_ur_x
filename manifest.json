@@ -1,0 +1,17 @@
+{
+  "short_name": "SnakesLadders",
+  "name": "Snakes and Ladders PWA App",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3021/3021183.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "display": "standalone",
+  "orientation": "portrait"
+}
