@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PWA Snakes & Ladders</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a2e;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 10px;
+        }
+        #status { font-size: 1.3rem; margin-bottom: 12px; font-weight: bold; color: #e94560; text-align: center; }
+        
+        /* Responsive board container */
+        #board-container {
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            aspect-ratio: 1 / 1;
+            margin-bottom: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            width: 100%;
+            height: 100%;
+            background-color: #162447;
+        }
+        .square {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+            position: relative;
+            border: 0.5px solid rgba(255,255,255,0.05);
+        }
+        .light { background-color: #1f4068; color: #e94560; }
+        .dark { background-color: #162447; color: #0f3460; }
+        
+        /* Overlay text indicators for special tiles */
+        .special-text {
+            font-size: 0.5rem;
+            position: absolute;
+            bottom: 2px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 1px 3px;
+            border-radius: 3px;
+            color: #fff;
+        }
+        .snake-tile .special-text { color: #ff4a4a; }
+        .ladder-tile .special-text { color: #4afe4a; }
+
+        /* Tokens layer overlay */
+        .token-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+        }
+        .token {
+            position: absolute;
+            width: 8%;
+            height: 8%;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+            z-index: 10;
+        }
+        #p1-token { background-color: #3498db; }
+        #p2-token { background-color: #2ecc71; }
+
+        /* Control Panel */
+        .controls { display: flex; gap: 15px; align-items: center; }
+        button {
+            padding: 12px 24px; font-size: 1rem;
+            background-color: #e94560; color: white; border: none;
+            border-radius: 5px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+        #dice-view {
+            font-size: 2rem;
+            background: #0f3460;
+            width: 50px; height: 50px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 8px; border: 2px solid #e94560;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status">Player 1's Turn (Blue)</div>
+    
+    <div id="board-container">
+        <div id="board"></div>
+        <div class="token-layer">
+            <div id="p1-token" class="token"></div>
+            <div id="p2-token" class="token"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="roll-btn" onclick="playTurn()">Roll Dice</button>
+        <div id="dice-view">⚀</div>
+        <button onclick="resetGame()" style="background-color: #53354a;">Reset</button>
+    </div>
+
+    <script>
+        // Define Snake and Ladder mappings (Start Square -> End Square)
+        const boardFeatures = {
+            // Ladders (Go Up)
+            3: 22, 5: 8, 11: 26, 20: 29, 17: 4, // 17 is a trick snake, let's keep classic layouts:
+            4: 14, 9: 31, 21: 42, 28: 84, 36: 44, 51: 67, 71: 91, 80: 100,
+            // Snakes (Go Down)
+            17: 7, 54: 34, 62: 19, 64: 60, 87: 24, 93: 73, 95: 75, 98: 79
+        };
+
+        let playerPositions = { 1: 0, 2: 0 }; // 0 means haven't entered the board yet
+        let activePlayer = 1;
+        let isMoving = false;
+        const diceGlyphs = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+
+        // Generate dynamic 10x10 alternating Grid
+        function initBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            
+            // Loop from rank 10 down to 1
+            for (let r = 9; r >= 0; r--) {
+                for (let f = 0; f < 10; f++) {
+                    // Standard boustrophedon layout math: alternate left/right directions
+                    let fileIndex = (r % 2 === 1) ? (9 - f) : f;
+                    let squareNum = (r * 10) + fileIndex + 1;
+                    
+                    const squareEl = document.createElement('div');
+                    const isLight = (r + f) % 2 === 0;
+                    squareEl.classList.add('square', isLight ? 'light' : 'dark');
+                    squareEl.id = `sq-${squareNum}`;
+                    squareEl.textContent = squareNum;
+
+                    // Display Label hints for Snakes and Ladders
+                    if (boardFeatures[squareNum]) {
+                        const target = boardFeatures[squareNum];
+                        const isLadder = target > squareNum;
+                        squareEl.classList.add(isLadder ? 'ladder-tile' : 'snake-tile');
+                        
+                        const textLabel = document.createElement('span');
+                        textLabel.classList.add('special-text');
+                        textLabel.textContent = isLadder ? `▲ Up ${target}` : `▼ Down ${target}`;
+                        squareEl.appendChild(textLabel);
+                    }
+                    
+                    boardEl.appendChild(squareEl);
+                }
+            }
+            updateTokenUI(1);
+            updateTokenUI(2);
+        }
+
+        // Translates square number logic to precise UI pixel positions overlay
+        function updateTokenUI(playerId) {
+            const pos = playerPositions[playerId];
+            const tokenEl = document.getElementById(`p${playerId}-token`);
+            
+            if (pos === 0) {
+                // Home Base positions (off board)
+                tokenEl.style.bottom = '1%';
+                tokenEl.style.left = playerId === 1 ? '1%' : '10%';
+                return;
+            }
+
+            const targetSquare = document.getElementById(`sq-${pos}`);
+            const container = document.getElementById('board-container');
+            
+            // Calculate absolute offsets relative to container size
+            const rect = targetSquare.getBoundingClientRect();
+            const parentRect = container.getBoundingClientRect();
+            
+            let leftOffset = ((rect.left - parentRect.left) / parentRect.width) * 100;
+            let topOffset = ((rect.top - parentRect.top) / parentRect.height) * 100;
+            
+            // Slightly nudge player 2 token so they don't block each other completely
+            if (playerId === 2) {
+                leftOffset += 2;
+                topOffset += 2;
+            }
+
+            tokenEl.style.left = `${leftOffset}%`;
+            tokenEl.style.top = `${topOffset}%`;
+        }
+
+        async function playTurn() {
+            if (isMoving) return;
+            isMoving = true;
+            document.getElementById('roll-btn').disabled = true;
+
+            const roll = Math.floor(Math.random() * 6) + 1;
+            document.getElementById('dice-view').textContent = diceGlyphs[roll - 1];
+
+            let currentPos = playerPositions[activePlayer];
+            let targetPos = currentPos + roll;
+
+            if (targetPos <= 100) {
+                // Step-by-step sequential moving animation rule
+                for (let step = currentPos + 1; step <= targetPos; step++) {
+                    playerPositions[activePlayer] = step;
+                    updateTokenUI(activePlayer);
+                    await new Promise(resolve => setTimeout(resolve, 200)); 
+                }
+                
+                // Evaluate Landing Rules (Snakes or Ladders triggers)
+                let finalPos = playerPositions[activePlayer];
+                if (boardFeatures[finalPos]) {
+                    await new Promise(resolve => setTimeout(resolve, 400)); // Brief pause before slide
+                    playerPositions[activePlayer] = boardFeatures[finalPos];
+                    updateTokenUI(activePlayer);
+                }
+            }
+
+            // Check Win Metrics
+            if (playerPositions[activePlayer] === 100) {
+                document.getElementById('status').textContent = `🎉 Player ${activePlayer} Wins!`;
+                return;
+            }
+
+            // Rotate Turn Indexes
+            activePlayer = activePlayer === 1 ? 2 : 1;
+            document.getElementById('status').textContent = `Player ${activePlayer}'s Turn (${activePlayer === 1 ? 'Blue' : 'Green'})`;
+            
+            isMoving = false;
+            document.getElementById('roll-btn').disabled = false;
+        }
+
+        function resetGame() {
+            playerPositions = { 1: 0, 2: 0 };
+            activePlayer = 1;
+            isMoving = false;
+            document.getElementById('roll-btn').disabled = false;
+            document.getElementById('status').textContent = "Player 1's Turn (Blue)";
+            document.getElementById('dice-view').textContent = "⚀";
+            updateTokenUI(1);
+            updateTokenUI(2);
+        }
+
+        // Service Worker registration hook
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {});
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            updateTokenUI(1);
+            updateTokenUI(2);
+        });
+
+        initBoard();
+    </script>
+</body>
+</html>
